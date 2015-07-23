@@ -14,6 +14,7 @@ type Route struct {
 	Middleware []Middleware
 }
 
+// Middleware is a faux class for functions that wrap the handler
 type Middleware func(http.HandlerFunc) http.HandlerFunc
 
 // Routes is used to bundle Route's
