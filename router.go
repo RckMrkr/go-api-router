@@ -55,21 +55,22 @@ func createResources(resources Resources, r *mux.Router) {
 		return
 	}
 
-	c := make(chan bool, len(resources))
-	for _, resource := range resources {
-		go func() {
-			createSubRouter(resource, r)
-			c <- true
-		}()
+	//c := make(chan bool, len(resources))
+	for _, res := range resources {
+		// res := res
+		// go func() {
+		createSubRouter(res, r)
+		// c <- true
+		// }()
 	}
 
-	for _ = range resources {
-		<-c
-	}
+	// for _ = range resources {
+	// 	<-c
+	// }
 }
 
 func createSubRouter(res Resource, r *mux.Router) {
-	s := r.Path(res.Path).Subrouter()
+	s := r.PathPrefix(res.Path).Subrouter()
 	createResources(res.resources(), s)
 
 	if res.Routes == nil {
@@ -88,8 +89,8 @@ func createSubRouter(res Resource, r *mux.Router) {
 
 func createHandler(handler http.HandlerFunc, wrappers ...[]Middleware) http.HandlerFunc {
 	for _, middlewares := range wrappers {
-		for _, middleware := range middlewares {
-			handler = middleware(handler)
+		for i := len(middlewares) - 1; i >= 0; i-- {
+			handler = middlewares[i](handler)
 		}
 	}
 	return handler
