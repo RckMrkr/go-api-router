@@ -1,97 +1,114 @@
 package router
 
 import (
-	"github.com/gorilla/mux"
+	"fmt"
 	"net/http"
+	"strings"
+
+	"github.com/gorilla/mux"
 )
 
 // Route type is used to specify a specific endpoint.
 type Route struct {
-	Name       string
-	Method     []string
-	Pattern    string
-	Handler    http.HandlerFunc
-	Middleware []Middleware
+	Name    string
+	Headers []string
+	Host    string
+	Methods []string
+	Path    string
+	Queries []string
+	Schemes []string
+	Handler http.HandlerFunc
+	Before  Before
+	After   After
 }
 
-// Middleware is a faux class for functions that wrap the handler
-type Middleware func(http.HandlerFunc) http.HandlerFunc
+// Before is a faux class for functions that wrap the handlers being run before the actual handler
+type Before []func(http.HandlerFunc) http.HandlerFunc
+
+// After is a faux class for functions that wrap the handlers being run before the actual handler
+type After []http.HandlerFunc
 
 // Routes is used to bundle Route's
 type Routes []Route
 
-// Resource is the "parent" of routes, meaning that the pattern of the Routes will always be prefixed by the Path of the preceding resources.
-type Resource struct {
-	Path       string
-	Resources  Resources
-	Routes     Routes
-	Middleware []Middleware
-}
+func createRoute(router *mux.Router, route Route) {
+	r := router.
+		Path(route.Path).
+		Name(route.Name)
 
-func (r Resource) resources() Resources {
-	if r.Middleware == nil {
-		return r.Resources
+	if route.Headers != nil {
+		r.Headers(route.Headers...)
 	}
 
-	for i := range r.Resources {
-		r.Resources[i].Middleware = append(r.Middleware, r.Resources[i].Middleware...)
+	if route.Queries != nil {
+		r.Queries(route.Queries...)
 	}
 
-	return r.Resources
-}
+	if route.Schemes != nil {
+		r.Schemes(route.Schemes...)
+	}
 
-// Resources is used to bundle Resource's
-type Resources []Resource
+	if route.Methods != nil {
+		r.Methods(route.Methods...)
+	}
+
+	if route.Host != "" {
+		r.Host(route.Host)
+	}
+
+	handler := route.Handler
+	beforeLength := len(route.Before) - 1
+	for i := range route.Before {
+		handler = route.Before[beforeLength-i](handler)
+	}
+
+	r.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r)
+		for _, after := range route.After {
+			after(w, r)
+		}
+	})
+
+}
 
 // CreateRouter Creates a router you can use to listen and serve
-func CreateRouter(resources Resources) *mux.Router {
-	r := mux.NewRouter().StrictSlash(true)
-	createResources(resources, r)
-	return r
-}
+func CreateRouter(routes Routes) *mux.Router {
+	var i int
+	var router *mux.Router
+	var routerPath string
+	var ok bool
 
-func createResources(resources Resources, r *mux.Router) {
-	if resources == nil {
-		return
-	}
+	routers := make(map[string]*mux.Router, len(routes))
+	baseRouter := mux.NewRouter()
+	routers[""] = baseRouter
 
-	//c := make(chan bool, len(resources))
-	for _, res := range resources {
-		// res := res
-		// go func() {
-		createSubRouter(res, r)
-		// c <- true
-		// }()
-	}
+	for _, route := range routes {
+		parts := strings.Split(route.Path, "/")
+		parts = parts[1:]
 
-	// for _ = range resources {
-	// 	<-c
-	// }
-}
-
-func createSubRouter(res Resource, r *mux.Router) {
-	s := r.PathPrefix(res.Path).Subrouter()
-	createResources(res.resources(), s)
-
-	if res.Routes == nil {
-		return
-	}
-	for _, route := range res.Routes {
-		handler := createHandler(route.Handler, route.Middleware, res.Middleware)
-		s.
-			Methods(route.Method...).
-			Path(route.Pattern).
-			Name(route.Name).
-			Handler(handler)
-	}
-
-}
-
-func createHandler(handler http.HandlerFunc, wrappers ...[]Middleware) http.HandlerFunc {
-	for _, middlewares := range wrappers {
-		for i := len(middlewares) - 1; i >= 0; i-- {
-			handler = middlewares[i](handler)
+		// Finding the closest preexisting router
+		for i = range parts {
+			routeSlices := parts[1 : len(parts)-i]
+			routerPath = strings.Join(routeSlices, "/")
+			router, ok = routers[routerPath]
+			if ok {
+				break
+			}
 		}
+
+		i = len(parts) - i
+
+		// Create the subrouters we need
+		for ; i < len(parts); i++ {
+			prefix := fmt.Sprintf("/%s", parts[i-1])
+			route.Path = route.Path[len(prefix):]
+			router = router.PathPrefix(prefix).Subrouter()
+			routerPath = strings.Join(parts[:i], "/")
+			routers[routerPath] = router
+		}
+
+		createRoute(router, route)
 	}
-	return handler
+
+	return baseRouter
 }

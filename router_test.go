@@ -2,15 +2,16 @@ package router
 
 import (
 	"fmt"
-	"github.com/gorilla/mux"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gorilla/mux"
+
 	"github.com/stretchr/testify/assert"
 )
 
-func middlewareWrapper(str string) func(http.HandlerFunc) http.HandlerFunc {
+func before(str string) func(http.HandlerFunc) http.HandlerFunc {
 	return func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, str)
@@ -19,7 +20,13 @@ func middlewareWrapper(str string) func(http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func handlerWrapper(str string) http.HandlerFunc {
+func after(str string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, str)
+	}
+}
+
+func handler(str string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, str)
 		return
@@ -27,80 +34,192 @@ func handlerWrapper(str string) http.HandlerFunc {
 }
 
 func testRouter() *mux.Router {
-	res := Resources{
-		Resource{
-			Path: "/users/",
-			Middleware: []Middleware{
-				middlewareWrapper("1"),
-				middlewareWrapper("2"),
-				middlewareWrapper("3"),
-			},
-			Routes: Routes{
-				Route{
-					Pattern: "/",
-					Name:    "UserIndex",
-					Method:  []string{"GET"},
-					Handler: handlerWrapper("6"),
-					Middleware: []Middleware{
-						middlewareWrapper("4"),
-						middlewareWrapper("5"),
-					},
-				},
-			},
-			Resources: Resources{
-				Resource{
-					Path: "/admins/",
-					Routes: Routes{
-						Route{
-							Pattern: "/",
-							Name:    "AdminCreate",
-							Method:  []string{"GET"},
-							Handler: handlerWrapper("7"),
-						},
-					},
-				},
-			},
+	res := Routes{
+		Route{
+			Path:    "/before",
+			Name:    "Before",
+			Methods: []string{"GET"},
+			Before:  Before{before("Before")},
+			Handler: handler("Handler"),
 		},
-		Resource{
-			Path: "/admins/",
-			Resources: Resources{
-				Resource{
-					Path: "/super/",
-					Routes: Routes{
-						Route{
-							Pattern: "/",
-							Name:    "AdminCreate",
-							Method:  []string{"GET"},
-							Handler: handlerWrapper("7"),
-						},
-					},
-				},
-			},
+		Route{
+			Path:    "/after",
+			Name:    "After",
+			Methods: []string{"GET"},
+			After:   After{after("After")},
+			Handler: handler("Handler"),
+		},
+		Route{
+			Path:    "/scheme",
+			Name:    "UserIndex",
+			Methods: []string{"GET"},
+			Schemes: []string{"https"},
+			Handler: handler("Scheme"),
+		},
+		Route{
+			Path:    "/host",
+			Name:    "Host",
+			Methods: []string{"GET"},
+			Host:    "correct.example.org",
+			Handler: handler("Host"),
+		},
+		Route{
+			Path:    "/r1/r2/",
+			Name:    "FirstSub",
+			Methods: []string{"GET"},
+			Handler: handler("FirstSub"),
+		},
+		Route{
+			Path:    "/r1/{r2}/r3",
+			Name:    "SecondSub",
+			Methods: []string{"GET"},
+			Handler: handler("SecondSub"),
+		},
+		Route{
+			Path:    "/queries",
+			Name:    "Queries",
+			Methods: []string{"GET"},
+			Handler: handler("Queries"),
+			Queries: []string{"key", "correct"},
+		},
+		Route{
+			Path:    "/headers",
+			Name:    "Headers",
+			Methods: []string{"GET"},
+			Handler: handler("Headers"),
+			Headers: []string{"X-Test-Header", "Is correct"},
 		},
 	}
 
 	return CreateRouter(res)
 }
 
-func TestAttachMiddleware(t *testing.T) {
+func TestShouldAttacheBefore(t *testing.T) {
 	assert := assert.New(t)
 	router := testRouter()
-	req, _ := http.NewRequest("GET", "http://example.com:43256/users/", nil)
+	req, _ := http.NewRequest("GET", "/before", nil)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.Equal("123456", w.Body.String())
-
+	assert.Equal("BeforeHandler", w.Body.String())
 }
 
-func TestSubResources(t *testing.T) {
+func TestShouldAttacheAfter(t *testing.T) {
 	assert := assert.New(t)
 	router := testRouter()
-	req, _ := http.NewRequest("GET", "http://example.com:43256/admins/super/", nil)
+	req, _ := http.NewRequest("GET", "/after", nil)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.Equal("7", w.Body.String())
+	assert.Equal("HandlerAfter", w.Body.String())
+}
+
+func TestIncorrectSchemeIsNotWorking(t *testing.T) {
+	assert := assert.New(t)
+	router := testRouter()
+	req, _ := http.NewRequest("GET", "http://example.org/scheme", nil)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(404, w.Code)
+}
+
+func TestCorrectSchemeIsWorking(t *testing.T) {
+	assert := assert.New(t)
+	router := testRouter()
+	req, _ := http.NewRequest("GET", "https://example.org/scheme", nil)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal("Scheme", w.Body.String())
+}
+
+func TestIncorrectHeadersIsNotWorking(t *testing.T) {
+	assert := assert.New(t)
+	router := testRouter()
+	req, _ := http.NewRequest("GET", "/headers", nil)
+	req.Header.Set("X-Test-Header", "Is not correct")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(404, w.Code)
+}
+
+func TestCorrectHeaderIsWorking(t *testing.T) {
+	assert := assert.New(t)
+	router := testRouter()
+	req, _ := http.NewRequest("GET", "/headers", nil)
+	req.Header.Set("X-Test-Header", "Is correct")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal("Headers", w.Body.String())
+}
+
+func TestIncorrectQueriesIsNotWorking(t *testing.T) {
+	assert := assert.New(t)
+	router := testRouter()
+	req, _ := http.NewRequest("GET", "/queries?key=incorrect", nil)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(404, w.Code)
+}
+
+func TestCorrectQueriesIsWorking(t *testing.T) {
+	assert := assert.New(t)
+	router := testRouter()
+	req, _ := http.NewRequest("GET", "/queries?key=correct", nil)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal("Queries", w.Body.String())
+}
+
+func TestCorrectHostIsWorking(t *testing.T) {
+	assert := assert.New(t)
+	router := testRouter()
+	req, _ := http.NewRequest("GET", "http://correct.example.org/host", nil)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal("Host", w.Body.String())
+	assert.Equal(200, w.Code)
+}
+
+func TestIncorrectHostIsNotWorking(t *testing.T) {
+	assert := assert.New(t)
+	router := testRouter()
+	req, _ := http.NewRequest("GET", "https://incorrect.example.org/host", nil)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(404, w.Code)
+}
+
+func TestSubrouters(t *testing.T) {
+	assert := assert.New(t)
+	router := testRouter()
+	req, _ := http.NewRequest("GET", "/r1/r2/", nil)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal("FirstSub", w.Body.String())
+	req, _ = http.NewRequest("GET", "/r1/r2/r3", nil)
+
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal("SecondSub", w.Body.String())
 }
