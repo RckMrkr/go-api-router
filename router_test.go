@@ -11,18 +11,21 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func before(str string) func(http.HandlerFunc) http.HandlerFunc {
+func after(str string) Middleware {
+	return func(h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			h.ServeHTTP(w, r)
+			fmt.Fprint(w, str)
+		}
+	}
+}
+
+func before(str string) Middleware {
 	return func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, str)
 			h.ServeHTTP(w, r)
 		}
-	}
-}
-
-func after(str string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, str)
 	}
 }
 
@@ -39,15 +42,20 @@ func testRouter() *mux.Router {
 			Path:    "/before",
 			Name:    "Before",
 			Methods: []string{"GET"},
-			Before:  Before{before("Before")},
+			Middleware: []Middleware{
+				after("A1"),
+				before("B1"),
+				after("A2"),
+				before("B2"),
+			},
 			Handler: handler("Handler"),
 		},
 		Route{
-			Path:    "/after",
-			Name:    "After",
-			Methods: []string{"GET"},
-			After:   After{after("After")},
-			Handler: handler("Handler"),
+			Path:       "/after",
+			Name:       "After",
+			Methods:    []string{"GET"},
+			Middleware: []Middleware{after("A1"), after("A2")},
+			Handler:    handler("Handler"),
 		},
 		Route{
 			Path:    "/scheme",
@@ -94,7 +102,7 @@ func testRouter() *mux.Router {
 	return CreateRouter(res)
 }
 
-func TestShouldAttacheBefore(t *testing.T) {
+func TestShouldAttacheMiddleware(t *testing.T) {
 	assert := assert.New(t)
 	router := testRouter()
 	req, _ := http.NewRequest("GET", "/before", nil)
@@ -102,18 +110,12 @@ func TestShouldAttacheBefore(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.Equal("BeforeHandler", w.Body.String())
-}
-
-func TestShouldAttacheAfter(t *testing.T) {
-	assert := assert.New(t)
-	router := testRouter()
-	req, _ := http.NewRequest("GET", "/after", nil)
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal("HandlerAfter", w.Body.String())
+	body := w.Body.String()
+	assert.Contains(body, "A1")
+	assert.Contains(body, "A2")
+	assert.Contains(body, "B1")
+	assert.Contains(body, "B2")
+	assert.Contains(body, "Handler")
 }
 
 func TestIncorrectSchemeIsNotWorking(t *testing.T) {

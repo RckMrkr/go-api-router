@@ -10,23 +10,19 @@ import (
 
 // Route type is used to specify a specific endpoint.
 type Route struct {
-	Name    string
-	Headers []string
-	Host    string
-	Methods []string
-	Path    string
-	Queries []string
-	Schemes []string
-	Handler http.HandlerFunc
-	Before  Before
-	After   After
+	Name       string
+	Headers    []string
+	Host       string
+	Methods    []string
+	Path       string
+	Queries    []string
+	Schemes    []string
+	Handler    http.HandlerFunc
+	Middleware []Middleware
 }
 
-// Before is a faux class for functions that wrap the handlers being run before the actual handler
-type Before []func(http.HandlerFunc) http.HandlerFunc
-
-// After is a faux class for functions that wrap the handlers being run before the actual handler
-type After []http.HandlerFunc
+// Filters is a faux class for handlers executed before and after the main handler
+type Middleware func(http.HandlerFunc) http.HandlerFunc
 
 // Routes is used to bundle Route's
 type Routes []Route
@@ -56,17 +52,12 @@ func createRoute(router *mux.Router, route Route) {
 		r.Host(route.Host)
 	}
 
-	handler := route.Handler
-	beforeLength := len(route.Before) - 1
-	for i := range route.Before {
-		handler = route.Before[beforeLength-i](handler)
-	}
-
 	r.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handler.ServeHTTP(w, r)
-		for _, after := range route.After {
-			after(w, r)
+		handler := route.Handler
+		for _, middleware := range route.Middleware {
+			handler = middleware(handler)
 		}
+		handler.ServeHTTP(w, r)
 	})
 
 }
