@@ -27,6 +27,12 @@ type Middleware func(http.HandlerFunc) http.HandlerFunc
 // Routes is used to bundle Route's
 type Routes []Route
 
+func (rs Routes) addGlobalMiddleware(middleware []Middleware) {
+	for i, route := range rs {
+		rs[i].Middleware = append(route.Middleware, middleware...)
+	}
+}
+
 func createRoute(router *mux.Router, route Route) {
 	r := router.
 		Path(route.Path).
@@ -63,7 +69,7 @@ func createRoute(router *mux.Router, route Route) {
 }
 
 // CreateRouter Creates a router you can use to listen and serve
-func CreateRouter(routes Routes) *mux.Router {
+func New(routes Routes) *mux.Router {
 	var i int
 	var router *mux.Router
 	var routerPath string

@@ -78,7 +78,7 @@ func testRouter() *mux.Router {
 			Handler: handler("FirstSub"),
 		},
 		Route{
-			Path:    "/r1/{r2}/r3",
+			Path:    "/r1/r2/r3",
 			Name:    "SecondSub",
 			Methods: []string{"GET"},
 			Handler: handler("SecondSub"),
@@ -99,7 +99,7 @@ func testRouter() *mux.Router {
 		},
 	}
 
-	return CreateRouter(res)
+	return New(res)
 }
 
 func TestShouldAttacheMiddleware(t *testing.T) {
@@ -224,4 +224,25 @@ func TestSubrouters(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal("SecondSub", w.Body.String())
+}
+
+func TestApplyMiddlewareAfter(t *testing.T) {
+	assert := assert.New(t)
+	res := Routes{
+		Route{
+			Path:    "/middleware",
+			Name:    "Middleware",
+			Methods: []string{"GET"},
+			Handler: handler("Handler"),
+		},
+	}
+	res.addGlobalMiddleware([]Middleware{after("A1")})
+	router := New(res)
+	req, _ := http.NewRequest("GET", "/middleware", nil)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal("HandlerA1", w.Body.String())
+
 }
