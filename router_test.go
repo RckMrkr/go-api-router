@@ -236,7 +236,7 @@ func TestApplyMiddlewareAfter(t *testing.T) {
 			Handler: handler("Handler"),
 		},
 	}
-	res.addGlobalMiddleware([]Middleware{after("A1")})
+	res.AddGlobalMiddleware([]Middleware{after("A1")})
 	router := New(res)
 	req, _ := http.NewRequest("GET", "/middleware", nil)
 

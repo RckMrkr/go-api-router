@@ -27,7 +27,7 @@ type Middleware func(http.HandlerFunc) http.HandlerFunc
 // Routes is used to bundle Route's
 type Routes []Route
 
-func (rs Routes) addGlobalMiddleware(middleware []Middleware) {
+func (rs Routes) AddGlobalMiddleware(middleware []Middleware) {
 	for i, route := range rs {
 		rs[i].Middleware = append(route.Middleware, middleware...)
 	}
